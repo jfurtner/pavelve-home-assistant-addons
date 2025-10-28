@@ -22,12 +22,22 @@ This add-on provides a complete SMS gateway solution for Home Assistant, replaci
 - **Text Input Fields** directly in Home Assistant device
 - **Smart Button** for easy SMS sending from UI
 - **Phone Number Persistence** - keeps number for multiple messages
+- **Automatic Unicode Detection** - Czech/special characters handled automatically
+- **Delete All SMS Button** - Clear SIM card storage with one click
+- **Auto-delete SMS** - Optional automatic deletion after reading
+- **Reset Counter Button** - Reset SMS statistics
 
 ### 📊 Device Monitoring
 - **Signal Strength** sensor with percentage display
 - **Network Info** showing operator name and status
 - **Last SMS Received** sensor with full message details
 - **SMS Send Status** tracking success/error states
+- **SMS Counter** with persistent storage (survives restarts)
+- **SMS Cost Tracking** (optional, configurable price per SMS)
+- **Modem Info** sensors (IMEI, Model, Manufacturer)
+- **SIM Card Info** (IMSI identification)
+- **SMS Storage Capacity** monitoring (used/total on SIM)
+- **Modem Status** tracking device connectivity
 - **Real-time Updates** via MQTT with auto-discovery
 
 ### 🔧 Integration Options
@@ -80,6 +90,13 @@ This add-on provides a complete SMS gateway solution for Home Assistant, replaci
 | `mqtt_topic_prefix` | `homeassistant/sensor/sms_gateway` | Topic prefix |
 | `sms_monitoring_enabled` | `true` | Auto-detect incoming SMS |
 | `sms_check_interval` | `60` | SMS check interval (seconds) |
+
+### Advanced Settings
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `sms_cost_per_message` | `0.0` | Cost per SMS (set to 0 to disable cost tracking sensor) |
+| `auto_delete_read_sms` | `false` | Automatically delete SMS after reading |
 
 ### Example Configuration
 

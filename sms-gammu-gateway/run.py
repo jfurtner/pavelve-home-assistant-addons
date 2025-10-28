@@ -42,14 +42,17 @@ def load_ha_config():
             'ssl': False,
             'username': 'admin',
             'password': 'password',
-            'mqtt_enabled': False,
+            'mqtt_enabled': True,
             'mqtt_host': 'localhost',
             'mqtt_port': 1883,
             'mqtt_username': '',
             'mqtt_password': '',
             'mqtt_topic_prefix': 'homeassistant/sensor/sms_gateway',
             'sms_monitoring_enabled': True,
-            'sms_check_interval': 60
+            'sms_check_interval': 60,
+            'sms_cost_per_message': 0.0,
+            'sms_cost_currency': 'CZK',
+            'auto_delete_read_sms': False
         }
 
 # Load configuration
@@ -144,7 +147,7 @@ def home():
             
             <div class="status">
                 <strong>✅ Gateway is running properly</strong><br>
-                Version: 1.3.2
+                Version: 1.4.3
             </div>
             
             <a href="http://''' + request.host.split(':')[0] + ''':5000/docs/" 
@@ -170,11 +173,11 @@ def home():
     '''
     return Response(html, mimetype='text/html')
 
-# Swagger UI Configuration  
+# Swagger UI Configuration
 # Put Swagger UI on /docs/ path for direct access via port 5000
 api = Api(
-    app, 
-    version='1.3.2',
+    app,
+    version='1.4.3',
     title='SMS Gammu Gateway API',
     description='REST API for sending and receiving SMS messages via USB GSM modems (SIM800L, Huawei, etc.). Modern replacement for deprecated SMS notifications via GSM-modem integration.',
     doc='/docs/',  # Swagger UI on /docs/ path
@@ -234,6 +237,25 @@ send_response = api.model('Send Response', {
 reset_response = api.model('Reset Response', {
     'status': fields.Integer(description='HTTP status code', example=200),
     'message': fields.String(description='Reset message', example='Reset done')
+})
+
+modem_info_response = api.model('Modem Info', {
+    'IMEI': fields.String(description='Modem IMEI number', example='123456789012345'),
+    'Manufacturer': fields.String(description='Modem manufacturer', example='Huawei'),
+    'Model': fields.String(description='Modem model', example='E3372'),
+    'Firmware': fields.String(description='Firmware version', example='22.323.62.00.143')
+})
+
+sim_info_response = api.model('SIM Info', {
+    'IMSI': fields.String(description='SIM IMSI number', example='230011234567890')
+})
+
+sms_capacity_response = api.model('SMS Capacity', {
+    'SIMUsed': fields.Integer(description='SMS count in SIM memory', example=5),
+    'SIMSize': fields.Integer(description='SIM total capacity', example=50),
+    'PhoneUsed': fields.Integer(description='SMS count in phone memory', example=0),
+    'PhoneSize': fields.Integer(description='Phone memory capacity', example=100),
+    'TemplatesUsed': fields.Integer(description='SMS templates used', example=0)
 })
 
 # API Namespaces
@@ -297,6 +319,12 @@ class SmsCollection(Resource):
                 message["Number"] = number.strip()
                 messages.append(message)
         result = [mqtt_publisher.track_gammu_operation("SendSMS", machine.SendSMS, message) for message in messages]
+
+        # Increment SMS counter for each sent message
+        for _ in messages:
+            mqtt_publisher.sms_counter.increment()
+        mqtt_publisher.publish_sms_counter()
+
         return {"status": 200, "message": str(result)}, 200
 
 @ns_sms.route('/<int:id>')
@@ -346,6 +374,20 @@ class GetSms(Resource):
                 mqtt_publisher.publish_sms_received(sms)
         return sms
 
+@ns_sms.route('/deleteall')
+@ns_sms.doc('delete_all_sms')
+class DeleteAllSms(Resource):
+    @ns_sms.doc('delete_all_messages')
+    @ns_sms.doc(security='basicAuth')
+    @auth.login_required
+    def delete(self):
+        """Delete all SMS messages from SIM/device memory"""
+        allSms = mqtt_publisher.track_gammu_operation("retrieveAllSms", retrieveAllSms, machine)
+        count = len(allSms)
+        for sms in allSms:
+            mqtt_publisher.track_gammu_operation("deleteSms", deleteSms, machine, sms)
+        return {"status": 200, "message": f"Deleted {count} SMS messages"}, 200
+
 @ns_status.route('/signal')
 @ns_status.doc('get_signal_quality')
 class Signal(Resource):
@@ -371,6 +413,63 @@ class Network(Resource):
         mqtt_publisher.publish_network_info(network)
         return network
 
+@ns_status.route('/modem')
+@ns_status.doc('get_modem_info')
+class ModemInfo(Resource):
+    @ns_status.doc('modem_information')
+    @ns_status.marshal_with(modem_info_response)
+    def get(self):
+        """Get modem hardware information (IMEI, manufacturer, model, firmware)"""
+        try:
+            modem_info = {
+                "IMEI": mqtt_publisher.track_gammu_operation("GetIMEI", machine.GetIMEI),
+                "Manufacturer": mqtt_publisher.track_gammu_operation("GetManufacturer", machine.GetManufacturer),
+                "Model": mqtt_publisher.track_gammu_operation("GetModel", machine.GetModel)
+            }
+            try:
+                # Firmware can fail on some modems
+                modem_info["Firmware"] = mqtt_publisher.track_gammu_operation("GetFirmware", machine.GetFirmware)[0]
+            except:
+                modem_info["Firmware"] = "Unknown"
+
+            # Publish to MQTT if enabled
+            mqtt_publisher.publish_modem_info(modem_info)
+            return modem_info
+        except Exception as e:
+            api.abort(500, f"Failed to get modem info: {str(e)}")
+
+@ns_status.route('/sim')
+@ns_status.doc('get_sim_info')
+class SimInfo(Resource):
+    @ns_status.doc('sim_information')
+    @ns_status.marshal_with(sim_info_response)
+    def get(self):
+        """Get SIM card information (IMSI)"""
+        try:
+            sim_info = {
+                "IMSI": mqtt_publisher.track_gammu_operation("GetSIMIMSI", machine.GetSIMIMSI)
+            }
+            # Publish to MQTT if enabled
+            mqtt_publisher.publish_sim_info(sim_info)
+            return sim_info
+        except Exception as e:
+            api.abort(500, f"Failed to get SIM info: {str(e)}")
+
+@ns_status.route('/sms_capacity')
+@ns_status.doc('get_sms_capacity')
+class SmsCapacity(Resource):
+    @ns_status.doc('sms_storage_capacity')
+    @ns_status.marshal_with(sms_capacity_response)
+    def get(self):
+        """Get SMS storage capacity and usage"""
+        try:
+            capacity = mqtt_publisher.track_gammu_operation("GetSMSStatus", machine.GetSMSStatus)
+            # Publish to MQTT if enabled
+            mqtt_publisher.publish_sms_capacity(capacity)
+            return capacity
+        except Exception as e:
+            api.abort(500, f"Failed to get SMS capacity: {str(e)}")
+
 @ns_status.route('/reset')
 @ns_status.doc('reset_modem')
 class Reset(Resource):
@@ -382,7 +481,7 @@ class Reset(Resource):
         return {"status": 200, "message": "Reset done"}, 200
 
 if __name__ == '__main__':
-    print(f"🚀 SMS Gammu Gateway v1.3.2 started successfully!")
+    print(f"🚀 SMS Gammu Gateway v1.4.3 started successfully!")
     print(f"📱 Device: {device_path}")
     print(f"🌐 API available on port {port}")
     print(f"🏠 Web UI: http://localhost:{port}/")

@@ -41,6 +41,12 @@ configuration:
   sms_check_interval:
     name: Interval Kontroly SMS
     description: Jak často kontrolovat nové SMS zprávy (sekundy, 30-300)
-  smsc_number:
-    name: SMSC Číslo
-    description: Číslo SMS centra operátora (např. +420603052000 pro T-Mobile). Nechte prázdné pro automatickou detekci.
+  sms_cost_per_message:
+    name: Cena za SMS
+    description: Cena za jednu odeslanou SMS zprávu. Nastavte 0 pro vypnutí sledování nákladů.
+  sms_cost_currency:
+    name: Měna
+    description: Měna pro zobrazení nákladů za SMS (např. CZK, EUR, USD, Kč)
+  auto_delete_read_sms:
+    name: Automaticky mazat přečtené SMS
+    description: Automaticky smazat SMS zprávy ze SIM karty po jejich přečtení (uvolní místo na SIM)
